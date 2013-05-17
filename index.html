@@ -1,0 +1,330 @@
+<html>
+<head>
+<!-- meta -->
+<meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Peer Interaction</title>
+
+<!-- css -->
+<link rel="stylesheet/less" type="text/css" href="styles/app.less" />
+
+<!-- javascript -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/libs/jquery-2.0.0.min.js"></script>
+<script src="/libs/less-1.3.3.min.js"></script>
+<script src="/libs/underscore-1.4.4.min.js"></script>
+<script src="/libs/bootstrap-2.3.1/bootstrap-alert.js"></script>
+<script src="/libs/bootstrap-2.3.1/bootstrap-modal.js"></script>
+<script src="/libs/bootstrap-2.3.1/bootstrap-tooltip.js"></script>
+<!-- needs to be loaded after tooltip -->
+<script src="/libs/bootstrap-2.3.1/bootstrap-popover.js"></script>
+<script src="/shared.js"></script>
+
+<script>
+/*! Peer Interaction - v1.0.0 - 2013-05-16 - .
+* Copyright (c) 2013 Han Lin Yap http://yap.nu */
+
+// window.location.search.substring(1)
+// k1=v1&k2=v2&k3
+function parseQueryString(query) {
+	var match,
+        pl        = /\+/g,  // Regex for replacing addition symbol with a space
+        search    = /([^&=]+)=?([^&]*)/g,
+        decode    = function (s) { return decodeURIComponent(s.replace(pl, " ")); },
+        urlParams = {};
+
+    while (match = search.exec(query))
+       urlParams[decode(match[1])] = decode(match[2]);
+	return urlParams;
+}
+
+function notify(text) {
+	console.log('Notify: ' + text);
+	var notify = $('<span class="label label-success"></span>').text(text).hide();
+	$('#notify').append(notify);
+	notify.show('slow');
+	setTimeout(function() {
+		notify.hide('slow', function() {
+			$(this).remove();
+		});
+	}, 5000);
+}
+
+function status(text) {
+	console.log('Status: ' + text);
+	$('#status').text(text);
+}
+
+function warn(html) {
+	var data = {
+		message: html
+	}
+	tmpl('warn', 'message-warn', data);
+}
+
+/**
+@param to string Where to set the template
+@param from string Template to use
+ */
+function tmpl(to, from, values) {
+	var spot = $('#spot-' + to).html( _.template( $('#tmpl-' + from).html(), values ) );
+
+	spot.find("a[rel='tooltip']").tooltip({
+		placement: 'bottom'
+	});
+	spot.find("a[rel='popover']").popover({
+		html: true
+		,placement: 'bottom'
+		,trigger: 'hover'
+	});
+}
+
+var socket;
+var room;
+jQuery(function($) {
+	$.ui = $.ui || {};
+	$.extend($.ui, {
+		keyCode: {
+			BACKSPACE: 8,
+			COMMA: 188,
+			DELETE: 46,
+			DOWN: 40,
+			END: 35,
+			ENTER: 13,
+			ESCAPE: 27,
+			HOME: 36,
+			LEFT: 37,
+			PAGE_DOWN: 34,
+			PAGE_UP: 33,
+			PERIOD: 190,
+			RIGHT: 39,
+			SPACE: 32,
+			TAB: 9,
+			UP: 38
+		}
+	});
+
+	socket = io.connect();
+	socket.on('connecting', function () {
+		status('Connecting to server...');
+	});
+	socket.on('connect', function() {
+		status('Connected');
+		tmpl('nickname', 'nickname-form');
+	});
+	socket.on('disconnect', function () {
+		status('Disconnected');
+	});
+	socket.on('connect_failed', function () {
+		status('Use other browser');
+	});
+	socket.on('error', function () {
+		status('Error');
+	});
+	socket.on('reconnect_failed', function () {
+		status('Reconnect failed. Please reload the page');
+	});
+	socket.on('reconnect', function () {
+		status('Reconnected');
+	});
+	socket.on('reconnecting', function () {
+		status('Reconnecting...');
+	});
+
+	// Gets object or false
+	socket.on('pi-connect-message', function (data) {
+		if (!data) {
+			warn('Nickname already in use');
+		} else {
+			tmpl('nickname', 'nickname-text', data);
+			tmpl('start-choice', 'start-choice-buttons');
+		}
+		
+		console.log(data);
+	});
+	socket.on('pi-room', function(data) {
+		room = new Room();
+		room.id = data.id;
+		room.addPlayers(data.players);
+
+		var d = {
+			link: window.location.origin + '/?id=' + room.id + '&screen=' + data.screen
+			,room: room.id
+		};
+		tmpl('start-choice', 'start-choice-after', d);
+		console.log(data);
+	});
+	socket.on('pi-player-add', function(player) {
+		notify('Join:' + player.nickname);
+		room.addPlayer(player);
+	});
+	socket.on('pi-player-remove', function(player) {
+		notify('Left:' + player.nickname);
+		room.removePlayer(player);
+	});
+	socket.on('pi-player-command', function(data) {
+		console.log('command')
+		console.log(data);
+		var player = _.findWhere(room.players, {nickname: data.player.nickname });
+		if (player) {
+			player.sendCommand(data.command, data.commandData);
+		}
+	})
+	socket.on('pi-rooms', function(data) {
+		console.log(data);
+	});
+	socket.on('players', function(data) {
+		console.log(data);
+	});
+
+	$(document).on('click', '[data-pi="connect-random"]', function() {
+		$(".alert").alert('close')
+		socket.emit('pi-connect-random');
+		return false;
+	});
+
+	$(document).on('click', '[data-pi="connect"]', function() {
+		var data = {
+			nickname: $('#tmpl-nickname-form-nickname').val()
+		}
+		if (data.nickname) {
+			socket.emit('pi-connect', data);
+		} else {
+			warn('Please enter a nickname or ' + '<a class="btn" href="#" data-pi="connect-random">choose a random name</a>');
+		}
+		return false;
+	});
+
+	$(document).on('click', '[data-pi="create"]', function() {
+		socket.emit('pi-create');
+		return false;
+	});
+	$(document).on('click', '[data-pi="join"]', function() {
+		var qs = window.location.search.substring(1);
+		if (qs) {
+			var data = parseQueryString(qs);
+			data.id = parseInt(data.id, 10) || 1;
+			data.screen = parseInt(data.screen, 10) || 1;
+			socket.emit('pi-join', data);
+		}
+		return false;
+	});
+
+	$(document).on('click', '[data-pi="disconnect"]', function() {
+		tmpl('nickname', 'nickname-form');
+		socket.emit('pi-disconnect');
+		return false;
+	});
+
+	$(document).keyup(function(e) {
+		if (e.target.nodeName == 'INPUT' ||
+			e.target.nodeName == 'TEXTAREA') return;
+		
+		var player = _.findWhere(room.players, {nickname: $('#nickname').text() });
+
+
+	    switch(e.which) {
+	        case $.ui.keyCode.LEFT:
+	        	player.sendCommand('left')
+	        	socket.emit('pi-player-command', {
+	        		command: 'left'
+	        	});
+	        	break;
+	
+	        case $.ui.keyCode.UP:
+	        	player.sendCommand('up')
+	        	socket.emit('pi-player-command', {
+	        		command: 'up'
+	        	});
+	        	break;
+	
+	        case $.ui.keyCode.RIGHT:
+	        	player.sendCommand('right')
+	        	socket.emit('pi-player-command', {
+	        		command: 'right'
+	        	});
+	        	break;
+	
+	        case $.ui.keyCode.DOWN:
+	        	player.sendCommand('down')
+	        	socket.emit('pi-player-command', {
+	        		command: 'down'
+	        	});
+	        	break;
+	
+	    }
+	
+	    e.preventDefault();
+	});
+
+	$("a[rel='tooltip']").tooltip({
+		placement: 'bottom'
+	});
+});
+</script>
+</head>
+<body>
+
+<div class="navbar">
+	<div class="navbar-inner">
+		<a class="brand" href="#">Peer Interaction</a>
+		<span id="spot-nickname"></span>
+		
+	</div>
+</div>
+
+
+<p id="spot-warn"></p>
+<p id="notify"></p>
+<p id="status"></p>
+<div id="gamearea">
+	<div class="player"></div>
+</div>
+
+<!-- Modal -->
+<div id="myModal" class="modal hide fade" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true">
+  <div class="modal-header">
+    <button type="button" class="close" data-dismiss="modal" aria-hidden="true">×</button>
+    <h3 id="myModalLabel">Modal header</h3>
+  </div>
+  <div class="modal-body">
+    <p>One fine body…</p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn" data-dismiss="modal" aria-hidden="true">Close</button>
+    <button class="btn btn-primary">Save changes</button>
+  </div>
+</div>
+
+<script id="tmpl-message-warn" type="text/template">
+<div class="alert">
+	<button type="button" class="close" data-dismiss="alert">&times;</button>
+	<%= message %>
+</div>
+</script>
+
+<script id="tmpl-nickname-form" type="text/template">
+<form class="navbar-form pull-left">
+	<input id="tmpl-nickname-form-nickname" type="text" class="span2" placeholder="Enter nickname">
+	<button type="submit" class="btn" data-pi="connect">Connect</button>
+</form>
+</script>
+<script id="tmpl-nickname-text" type="text/template">
+Nickname: <span id="nickname"><%= nickname %></span>
+<button type="submit" class="btn" data-pi="disconnect">Disconnect</button>
+<span id="spot-start-choice">
+</span>
+</script>
+
+<script id="tmpl-start-choice-buttons" type="text/template">
+<a href="#" class="btn" data-pi="create" rel="tooltip" title="Start a new room">Create</a>
+<a href="#" class="btn" data-pi="join" rel="tooltip" title="Join an existing room">Join</a>
+<a href="#myModal" role="button" class="btn" data-toggle="modal" rel="tooltip" title="Join as new room">Extend</a>
+</script>
+<script id="tmpl-start-choice-after" type="text/template">
+<a target="_blank" rel="popover" href="<%= link %>" data-original-title="Join via barcode" data-content="Room: <%= room %><br><img src='http://chart.apis.google.com/chart?cht=qr&chs=150x150&chl=<%= encodeURIComponent(link) %>&chld=H|0' />"><%= link %></a>
+</script>
+</body>
+</html>
