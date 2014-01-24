@@ -152,6 +152,13 @@ io.sockets.on('connection', function (socket) {
 			}
 		};
 	});
+	socket.on('pi-player-broadcast', function(data) {
+		for (var i = io.sockets.clients(player.room).length - 1; i >= 0; i--) {
+			if (io.sockets.clients(player.room)[i].player.nickname != player.nickname) {
+				io.sockets.clients(player.room)[i].emit('pi-player-broadcast', data);
+			}
+		};
+	});
 	socket.on('pi-rooms', function() {
 		socket.emit('pi-rooms', io.sockets.manager.rooms);
 	});
